@@ -2,13 +2,17 @@
 K8 The Hard Way
 
 ### Credentials
-
-- Create a service account and service account key on glcou.
+- Create a service account and service account key on glcoud.
   Save as `gcloud_creds.json` in root dir.
 
-### Build
-- Build the terraform docker file `docker build ./ -t snssqst:0`
+### Project Name
+Change the project name in main.tf to the specific project name you are using.
 
+### Build
+- Build the terraform docker file `docker build -f Dockerfile_terraform -t snssqst:0 .`
+- Build the gcloud docker file `docker build -f Dockerfile_terraform -t snssqst:0 .`
+
+### Terraform
 - Init the project. This will create terraform config files
   in this directory
   `docker run -it -v $PWD:/workspace -w /workspace snssqst:0 init`
@@ -19,4 +23,10 @@ K8 The Hard Way
 - To apply
   `docker run -it -v $PWD:/workspace -w /workspace teratut:0 apply`
 
-- Login as the IAM user to see resources that were provisioned
+### Gcloud
+Test if gcloud works. Make sure to use the specific project name
+
+`docker run -v $PWD:/workspace -w /workspace -it k8gc:0.0 gcloud --project k8hardway-333211 services list`
+
+
+

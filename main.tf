@@ -15,7 +15,7 @@ provider "google"{
 resource "google_compute_instance" "default" {
   name = "default"
   machine_type = "g1-small"
-  zone = "us-east1-b"
+  zone = "australia-southeast2-b"
   tags =[
     "name","default"
   ]
