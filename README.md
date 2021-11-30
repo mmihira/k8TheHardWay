@@ -28,5 +28,3 @@ Test if gcloud works. Make sure to use the specific project name
 
 `docker run -v $PWD:/workspace -w /workspace -it k8gc:0.0 gcloud --project k8hardway-333211 services list`
 
-
-
