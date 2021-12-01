@@ -1,6 +1,10 @@
 gcloud_creds.json
 gcloudconfig
 
+*.json
+*.pem
+*.csr
+
 # Local .terraform directories
 **/.terraform/*
 

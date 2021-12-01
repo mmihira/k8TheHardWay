@@ -23,6 +23,9 @@ Change the project name in main.tf to the specific project name you are using.
 - To apply
   `docker run -it -v $PWD:/workspace -w /workspace teratut:0 apply`
 
+- Print output
+  `docker run -it -v $PWD:/workspace -w /workspace teratut:0 show -json > out.json`
+
 ### Gcloud
 Test if gcloud works. Make sure to use the specific project name
 
