@@ -5,6 +5,9 @@ gcloudconfig
 *.pem
 *.csr
 
+ssh_key
+ssh_key.pub
+
 # Local .terraform directories
 **/.terraform/*
 

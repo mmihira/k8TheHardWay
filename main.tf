@@ -38,6 +38,10 @@ resource "google_compute_instance" "node1" {
     access_config {
     }
   }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file("ssh_key.pub")}"
+  }
 }
 
 resource "google_compute_instance" "node2" {
@@ -65,6 +69,10 @@ resource "google_compute_instance" "node2" {
     network = "default"
     access_config {
     }
+  }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file("ssh_key.pub")}"
   }
 }
 
@@ -94,6 +102,10 @@ resource "google_compute_instance" "cntrl1" {
     access_config {
     }
   }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file("ssh_key.pub")}"
+  }
 }
 
 resource "google_compute_instance" "cntrl2" {
@@ -122,6 +134,10 @@ resource "google_compute_instance" "cntrl2" {
     access_config {
     }
   }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file("ssh_key.pub")}"
+  }
 }
 
 resource "google_compute_instance" "lb" {
@@ -149,5 +165,9 @@ resource "google_compute_instance" "lb" {
     network = "default"
     access_config {
     }
+  }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file("ssh_key.pub")}"
   }
 }
