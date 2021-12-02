@@ -11,6 +11,7 @@ alias cfssljson=$GOPATH/bin/cfssljson
 rm *.csr
 rm *.json
 rm *.pem
+rm *.kubeconfig
 
 LB=$(cat $ROOT/out.json | jq '.values.root_module.resources[] | select(.name=="lb") | .')
 C1=$(cat $ROOT/out.json | jq '.values.root_module.resources[] | select(.name=="cntrl1") | .')

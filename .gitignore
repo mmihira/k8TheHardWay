@@ -4,6 +4,7 @@ gcloudconfig
 *.json
 *.pem
 *.csr
+*.kubeconfig
 
 ssh_key
 ssh_key.pub
