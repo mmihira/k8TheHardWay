@@ -86,15 +86,15 @@ cfssl gencert \
 # -------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------
 
-WORKER0_HOST=$(echo $N1 | jq  '.values.hostname' -r)
+WORKER0_HOST=$(echo $N1 | jq  '.values.name' -r)
 WORKER0_IP=$(echo $N1 | jq  '.values.network_interface[0].network_ip' -r)
-WORKER1_HOST=$(echo $N1 | jq  '.values.hostname' -r )
-WORKER1_IP=$(echo $N1 | jq  '.values.network_interface[0].network_ip' -r)
-CTRL0_HOST=$(echo $C1 | jq  '.values.hostname' -r)
+WORKER1_HOST=$(echo $N2 | jq  '.values.name' -r )
+WORKER1_IP=$(echo $N2 | jq  '.values.network_interface[0].network_ip' -r)
+CTRL0_HOST=$(echo $C1 | jq  '.values.name' -r)
 CTRL0_IP=$(echo $C1 | jq  '.values.network_interface[0].network_ip' -r)
-CTRL1_HOST=$(echo $C1 | jq  '.values.hostname' -r )
-CTRL1_IP=$(echo $C1 | jq  '.values.network_interface[0].network_ip' -r)
-LB1_HOST=$(echo $LB | jq  '.values.hostname' -r )
+CTRL1_HOST=$(echo $C2 | jq  '.values.name' -r )
+CTRL1_IP=$(echo $C2 | jq  '.values.network_interface[0].network_ip' -r)
+LB1_HOST=$(echo $LB | jq  '.values.name' -r )
 LB1_IP=$(echo $LB | jq  '.values.network_interface[0].network_ip' -r)
 
 echo "----------------------------------"
@@ -293,4 +293,3 @@ cfssl gencert \
   -config=ca-config.json \
   -profile=kubernetes \
   service-account-csr.json | cfssljson -bare service-account
-
