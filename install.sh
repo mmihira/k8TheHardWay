@@ -46,27 +46,30 @@ LB1_PRIV_IP=$(echo $LB | jq  '.values.network_interface[0].network_ip' -r)
 ctrl0ssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$CTRL0_PUB_IP"
 ctrl1ssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$CTRL1_PUB_IP"
 
-ssh-keygen -f "~/.ssh/known_hosts" -R $WORKER0_PUB_IP
-ssh-keygen -f "~/.ssh/known_hosts" -R $WORKER1_PUB_IP
-ssh-keygen -f "~/.ssh/known_hosts" -R $CTRL0_PUB_IP
-ssh-keygen -f "~/.ssh/known_hosts" -R $CTRL1_PUB_IP
+ssh-keygen -f ~/.ssh/known_hosts -R $WORKER0_PUB_IP
+ssh-keygen -f ~/.ssh/known_hosts -R $WORKER1_PUB_IP
+ssh-keygen -f ~/.ssh/known_hosts -R $CTRL0_PUB_IP
+ssh-keygen -f ~/.ssh/known_hosts -R $CTRL1_PUB_IP
 
 hurryup ubuntu $WORKER0_PUB_IP
 hurryup ubuntu $WORKER1_PUB_IP
 hurryup ubuntu $CTRL0_PUB_IP
 hurryup ubuntu $CTRL1_PUB_IP
 
+echo "Copying certs to worker 0"
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/ca.pem \
   ./certs/$WORKER0_HOST-key.pem \
   ./certs/$WORKER0_HOST.pem \
   ubuntu@$WORKER0_PUB_IP:~/
+echo "Copying certs to worker 1"
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/ca.pem \
   ./certs/$WORKER1_HOST-key.pem \
   ./certs/$WORKER1_HOST.pem \
   ubuntu@$WORKER1_PUB_IP:~/
 
+echo "Copying certs to controller 0"
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/ca.pem \
   ./certs/ca-key.pem \
@@ -76,6 +79,7 @@ scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/service-account.pem  \
   ubuntu@$CTRL0_PUB_IP:~/
 
+echo "Copying certs to controller 1"
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/ca.pem \
   ./certs/ca-key.pem \
@@ -88,6 +92,7 @@ scp -o StrictHostKeyChecking=no -i ./ssh_key \
 KUBERNETES_ADDRESS=$LB1_PRIV_IP
 instances=("$WORKER0_HOST" "$WORKER1_HOST")
 
+echo "Creating kubeconfig files"
 cd ./certs
 kctl="docker run -it -v $PWD:/workspace -w /workspace --user $(id -u):$(id -g) k8kc:0.0"
 for instance in ${instances[@]}; do
@@ -175,6 +180,7 @@ $kctl config set-context default \
   --kubeconfig=admin.kubeconfig
 $kctl config use-context default --kubeconfig=admin.kubeconfig
 
+echo "Copying kube configs to servers"
 scp -o StrictHostKeyChecking=no -i ./../ssh_key \
   ./$WORKER0_HOST-kubeconfig \
   ./kube-proxy.kubeconfig \
@@ -198,18 +204,19 @@ scp -o StrictHostKeyChecking=no -i ./../ssh_key \
   ubuntu@$CTRL1_PUB_IP:~/
 
 
+echo "Generating encryption-config"
 ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
 cat > encryption-config.yaml << EOF
 kind: EncryptionConfig
 apiVersion: v1
 resources:
   - resources:
-    - secrets
-  providers:
-    - aescbc:
-      keys:
-        - name: key1
-          secret: ${ENCRYPTION_KEY}
+      - secrets
+    providers:
+      - aescbc:
+          keys:
+            - name: key1
+              secret: ${ENCRYPTION_KEY}
       - identity: {}
 EOF
 
@@ -222,6 +229,10 @@ scp -o StrictHostKeyChecking=no -i ./../ssh_key \
 
 cd  $DIR
 echo $PWD
+
+echo "-----------------------------------------------------"
+echo "Installing etcd"
+echo "-----------------------------------------------------"
 
 $ctrl0ssh \
   sudo yum install wget -y
@@ -353,6 +364,19 @@ echo "-----------------------------------------------------"
 echo "Installing control plane"
 echo "-----------------------------------------------------"
 
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./sdstatus.sh \
+  ubuntu@$CTRL1_PUB_IP:~/
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./sdstatus.sh \
+  ubuntu@$CTRL0_PUB_IP:~/
+
+$ctrl1ssh \
+  chmod u+x ./sdstatus.sh
+$ctrl0ssh \
+  chmod u+x ./sdstatus.sh
+
 $ctrl1ssh sudo mkdir -p /etc/kubernetes/config
 
 $ctrl0ssh sudo mkdir -p /etc/kubernetes/config
@@ -390,6 +414,11 @@ $ctrl1ssh sudo cp ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem \
  service-account-key.pem service-account.pem \
  encryption-config.yaml /var/lib/kubernetes/
 
+$ctrl0ssh sudo mkdir -p /var/lib/kubernetes/
+$ctrl0ssh sudo cp ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem \
+ service-account-key.pem service-account.pem \
+ encryption-config.yaml /var/lib/kubernetes/
+
 echo "-----------------------------------------------------"
 echo "Setting up kube api service"
 echo "-----------------------------------------------------"
@@ -405,37 +434,36 @@ Description=Kubernetes API Server
 Documentation=https://github.com/kubernetes/kubernetes
 [Service]
 ExecStart=/usr/local/bin/kube-apiserver \\
---advertise-address=${INTERNAL_IP0} \\
---allow-privileged=true \\
---apiserver-count=3 \\
---audit-log-maxage=30 \\
---audit-log-maxbackup=3 \\
---audit-log-maxsize=100 \\
---audit-log-path=/var/log/audit.log \\
---authorization-mode=Node,RBAC \\
---bind-address=0.0.0.0 \\
---client-ca-file=/var/lib/kubernetes/ca.pem \\
---enable-admission-plugins=Initializers,NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,
-DefaultStorageClass,ResourceQuota \\
---enable-swagger-ui=true \\
---etcd-cafile=/var/lib/kubernetes/ca.pem \\
---etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
---etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
---etcd-servers=https://$CONTROLLER0_IP:2379,https://$CONTROLLER1_IP:2379 \\
---event-ttl=1h \\
---experimental-encryption-provider-config=/var/lib/kubernetes/encryption-config.yaml \\
---kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
---kubelet-client-certificate=/var/lib/kubernetes/kubernetes.pem \\
---kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
---kubelet-https=true \\
---runtime-config=api/all \\
---service-account-key-file=/var/lib/kubernetes/service-account.pem \\
---service-cluster-ip-range=10.32.0.0/24 \\
---service-node-port-range=30000-32767 \\
---tls-cert-file=/var/lib/kubernetes/kubernetes.pem \\
---tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \\
---v=2 \\
---kubelet-preferred-address-types=InternalIP,InternalDNS,Hostname,ExternalIP,ExternalDNS
+  --advertise-address=${INTERNAL_IP0} \\
+  --allow-privileged=true \\
+  --apiserver-count=3 \\
+  --audit-log-maxage=30 \\
+  --audit-log-maxbackup=3 \\
+  --audit-log-maxsize=100 \\
+  --audit-log-path=/var/log/audit.log \\
+  --authorization-mode=Node,RBAC \\
+  --bind-address=0.0.0.0 \\
+  --client-ca-file=/var/lib/kubernetes/ca.pem \\
+  --enable-admission-plugins=Initializers,NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota \\
+  --enable-swagger-ui=true \\
+  --etcd-cafile=/var/lib/kubernetes/ca.pem \\
+  --etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
+  --etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
+  --etcd-servers=https://$CONTROLLER0_IP:2379,https://$CONTROLLER1_IP:2379 \\
+  --event-ttl=1h \\
+  --experimental-encryption-provider-config=/var/lib/kubernetes/encryption-config.yaml \\
+  --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
+  --kubelet-client-certificate=/var/lib/kubernetes/kubernetes.pem \\
+  --kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
+  --kubelet-https=true \\
+  --runtime-config=api/all \\
+  --service-account-key-file=/var/lib/kubernetes/service-account.pem \\
+  --service-cluster-ip-range=10.32.0.0/24 \\
+  --service-node-port-range=30000-32767 \\
+  --tls-cert-file=/var/lib/kubernetes/kubernetes.pem \\
+  --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \\
+  --v=2 \\
+  --kubelet-preferred-address-types=InternalIP,InternalDNS,Hostname,ExternalIP,ExternalDNS
 Restart=on-failure
 RestartSec=5
 [Install]
@@ -448,37 +476,36 @@ Description=Kubernetes API Server
 Documentation=https://github.com/kubernetes/kubernetes
 [Service]
 ExecStart=/usr/local/bin/kube-apiserver \\
---advertise-address=${INTERNAL_IP1} \\
---allow-privileged=true \\
---apiserver-count=3 \\
---audit-log-maxage=30 \\
---audit-log-maxbackup=3 \\
---audit-log-maxsize=100 \\
---audit-log-path=/var/log/audit.log \\
---authorization-mode=Node,RBAC \\
---bind-address=0.0.0.0 \\
---client-ca-file=/var/lib/kubernetes/ca.pem \\
---enable-admission-plugins=Initializers,NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,
-DefaultStorageClass,ResourceQuota \\
---enable-swagger-ui=true \\
---etcd-cafile=/var/lib/kubernetes/ca.pem \\
---etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
---etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
---etcd-servers=https://$CONTROLLER0_IP:2379,https://$CONTROLLER1_IP:2379 \\
---event-ttl=1h \\
---experimental-encryption-provider-config=/var/lib/kubernetes/encryption-config.yaml \\
---kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
---kubelet-client-certificate=/var/lib/kubernetes/kubernetes.pem \\
---kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
---kubelet-https=true \\
---runtime-config=api/all \\
---service-account-key-file=/var/lib/kubernetes/service-account.pem \\
---service-cluster-ip-range=10.32.0.0/24 \\
---service-node-port-range=30000-32767 \\
---tls-cert-file=/var/lib/kubernetes/kubernetes.pem \\
---tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \\
---v=2 \\
---kubelet-preferred-address-types=InternalIP,InternalDNS,Hostname,ExternalIP,ExternalDNS
+  --advertise-address=${INTERNAL_IP1} \\
+  --allow-privileged=true \\
+  --apiserver-count=3 \\
+  --audit-log-maxage=30 \\
+  --audit-log-maxbackup=3 \\
+  --audit-log-maxsize=100 \\
+  --audit-log-path=/var/log/audit.log \\
+  --authorization-mode=Node,RBAC \\
+  --bind-address=0.0.0.0 \\
+  --client-ca-file=/var/lib/kubernetes/ca.pem \\
+  --enable-admission-plugins=Initializers,NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota \\
+  --enable-swagger-ui=true \\
+  --etcd-cafile=/var/lib/kubernetes/ca.pem \\
+  --etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
+  --etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
+  --etcd-servers=https://$CONTROLLER0_IP:2379,https://$CONTROLLER1_IP:2379 \\
+  --event-ttl=1h \\
+  --experimental-encryption-provider-config=/var/lib/kubernetes/encryption-config.yaml \\
+  --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
+  --kubelet-client-certificate=/var/lib/kubernetes/kubernetes.pem \\
+  --kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
+  --kubelet-https=true \\
+  --runtime-config=api/all \\
+  --service-account-key-file=/var/lib/kubernetes/service-account.pem \\
+  --service-cluster-ip-range=10.32.0.0/24 \\
+  --service-node-port-range=30000-32767 \\
+  --tls-cert-file=/var/lib/kubernetes/kubernetes.pem \\
+  --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \\
+  --v=2 \\
+  --kubelet-preferred-address-types=InternalIP,InternalDNS,Hostname,ExternalIP,ExternalDNS
 Restart=on-failure
 RestartSec=5
 [Install]
@@ -514,18 +541,18 @@ Description=Kubernetes Controller Manager
 Documentation=https://github.com/kubernetes/kubernetes
 [Service]
 ExecStart=/usr/local/bin/kube-controller-manager \\
---address=0.0.0.0 \\
---cluster-cidr=10.200.0.0/16 \\
---cluster-name=kubernetes \\
---cluster-signing-cert-file=/var/lib/kubernetes/ca.pem \\
---cluster-signing-key-file=/var/lib/kubernetes/ca-key.pem \\
---kubeconfig=/var/lib/kubernetes/kube-controller-manager.kubeconfig \\
---leader-elect=true \\
---root-ca-file=/var/lib/kubernetes/ca.pem \\
---service-account-private-key-file=/var/lib/kubernetes/service-account-key.pem \\
---service-cluster-ip-range=10.32.0.0/24 \\
---use-service-account-credentials=true \\
---v=2
+  --address=0.0.0.0 \\
+  --cluster-cidr=10.200.0.0/16 \\
+  --cluster-name=kubernetes \\
+  --cluster-signing-cert-file=/var/lib/kubernetes/ca.pem \\
+  --cluster-signing-key-file=/var/lib/kubernetes/ca-key.pem \\
+  --kubeconfig=/var/lib/kubernetes/kube-controller-manager.kubeconfig \\
+  --leader-elect=true \\
+  --root-ca-file=/var/lib/kubernetes/ca.pem \\
+  --service-account-private-key-file=/var/lib/kubernetes/service-account-key.pem \\
+  --service-cluster-ip-range=10.32.0.0/24 \\
+  --use-service-account-credentials=true \\
+  --v=2
 Restart=on-failure
 RestartSec=5
 [Install]
@@ -546,4 +573,100 @@ sudo cp kube-controller-manager.service /etc/systemd/system/kube-controller-mana
 $ctrl1ssh \
 sudo cp kube-controller-manager.service /etc/systemd/system/kube-controller-manager.service
 
+echo "-----------------------------------------------------"
+echo "Setting up kube scheduler"
+echo "-----------------------------------------------------"
+
+$ctrl0ssh \
+sudo cp kube-scheduler.kubeconfig /var/lib/kubernetes/
+
+$ctrl1ssh \
+sudo cp kube-scheduler.kubeconfig /var/lib/kubernetes/
+
+cat << EOF | tee ./kube-scheduler.yaml
+apiVersion: componentconfig/v1alpha1
+kind: KubeSchedulerConfiguration
+clientConnection:
+  kubeconfig: "/var/lib/kubernetes/kube-scheduler.kubeconfig"
+leaderElection:
+  leaderElect: true
+EOF
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-scheduler.yaml \
+  ubuntu@$CTRL0_PUB_IP:~/
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-scheduler.yaml \
+  ubuntu@$CTRL1_PUB_IP:~/
+
+$ctrl0ssh \
+sudo cp kube-scheduler.yaml /etc/kubernetes/config/kube-scheduler.yaml
+
+$ctrl1ssh \
+sudo cp kube-scheduler.yaml /etc/kubernetes/config/kube-scheduler.yaml
+
+cat << EOF | tee ./kube-scheduler.service
+[Unit]
+Description=Kubernetes Scheduler
+Documentation=https://github.com/kubernetes/kubernetes
+
+[Service]
+ExecStart=/usr/local/bin/kube-scheduler \\
+  --config=/etc/kubernetes/config/kube-scheduler.yaml \\
+  --v=2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-scheduler.service \
+  ubuntu@$CTRL0_PUB_IP:~/
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-scheduler.service \
+  ubuntu@$CTRL1_PUB_IP:~/
+
+$ctrl0ssh \
+sudo cp kube-scheduler.service /etc/systemd/system/kube-scheduler.service
+
+$ctrl1ssh \
+sudo cp kube-scheduler.service /etc/systemd/system/kube-scheduler.service
+
+$ctrl0ssh \
+sudo systemctl daemon-reload
+$ctrl0ssh \
+sudo systemctl enable kube-apiserver kube-controller-manager kube-scheduler
+$ctrl0ssh \
+sudo systemctl start kube-apiserver kube-controller-manager kube-scheduler
+
+$ctrl1ssh \
+sudo systemctl daemon-reload
+$ctrl1ssh \
+sudo systemctl enable kube-apiserver kube-controller-manager kube-scheduler
+$ctrl1ssh \
+sudo systemctl start kube-apiserver kube-controller-manager kube-scheduler
+
+$ctrl0ssh \
+sudo systemctl status kube-apiserver kube-controller-manager kube-scheduler
+
+$ctrl1ssh \
+sudo systemctl status kube-apiserver kube-controller-manager kube-scheduler
+
+$ctrl0ssh \
+  kubectl get componentstatuses --kubeconfig admin.kubeconfig
+
+$ctrl1ssh \
+  kubectl get componentstatuses --kubeconfig admin.kubeconfig
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./rbac.sh \
+  ubuntu@$CTRL0_PUB_IP:~/
+
+$ctrl0ssh ./rbac.sh
+
 rm ./*.service
+rm ./kube-scheduler.yaml
