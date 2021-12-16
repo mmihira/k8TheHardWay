@@ -45,28 +45,36 @@ LB1_PRIV_IP=$(echo $LB | jq  '.values.network_interface[0].network_ip' -r)
 
 ctrl0ssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$CTRL0_PUB_IP"
 ctrl1ssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$CTRL1_PUB_IP"
+lbssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$LB1_PUB_IP"
+w0ssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$WORKER0_PUB_IP"
+w1ssh="ssh -o StrictHostKeyChecking=no -i ./ssh_key ubuntu@$WORKER1_PUB_IP"
 
 ssh-keygen -f ~/.ssh/known_hosts -R $WORKER0_PUB_IP
 ssh-keygen -f ~/.ssh/known_hosts -R $WORKER1_PUB_IP
 ssh-keygen -f ~/.ssh/known_hosts -R $CTRL0_PUB_IP
 ssh-keygen -f ~/.ssh/known_hosts -R $CTRL1_PUB_IP
+ssh-keygen -f ~/.ssh/known_hosts -R $LB1_PUB_IP
 
 hurryup ubuntu $WORKER0_PUB_IP
 hurryup ubuntu $WORKER1_PUB_IP
 hurryup ubuntu $CTRL0_PUB_IP
 hurryup ubuntu $CTRL1_PUB_IP
+hurryup ubuntu $LB1_PUB_IP
 
 echo "Copying certs to worker 0"
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/ca.pem \
   ./certs/$WORKER0_HOST-key.pem \
   ./certs/$WORKER0_HOST.pem \
+  ./certs/$WORKER0_HOST.kubeconfig \
   ubuntu@$WORKER0_PUB_IP:~/
+
 echo "Copying certs to worker 1"
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./certs/ca.pem \
   ./certs/$WORKER1_HOST-key.pem \
   ./certs/$WORKER1_HOST.pem \
+  ./certs/$WORKER1_HOST.kubeconfig \
   ubuntu@$WORKER1_PUB_IP:~/
 
 echo "Copying certs to controller 0"
@@ -181,28 +189,27 @@ $kctl config set-context default \
 $kctl config use-context default --kubeconfig=admin.kubeconfig
 
 echo "Copying kube configs to servers"
-scp -o StrictHostKeyChecking=no -i ./../ssh_key \
-  ./$WORKER0_HOST-kubeconfig \
+scp -o StrictHostKeyChecking=no -i $DIR/ssh_key \
+  ./$WORKER0_HOST.kubeconfig \
   ./kube-proxy.kubeconfig \
   ubuntu@$WORKER0_PUB_IP:~/
 
-scp -o StrictHostKeyChecking=no -i ./../ssh_key \
-  ./$WORKER1_HOST-kubeconfig \
+scp -o StrictHostKeyChecking=no -i $DIR/ssh_key \
+  ./$WORKER1_HOST.kubeconfig \
   ./kube-proxy.kubeconfig \
   ubuntu@$WORKER1_PUB_IP:~/
 
-scp -o StrictHostKeyChecking=no -i ./../ssh_key \
+scp -o StrictHostKeyChecking=no -i $DIR/ssh_key \
   ./admin.kubeconfig \
   ./kube-controller-manager.kubeconfig \
   ./kube-scheduler.kubeconfig \
   ubuntu@$CTRL0_PUB_IP:~/
 
-scp -o StrictHostKeyChecking=no -i ./../ssh_key \
+scp -o StrictHostKeyChecking=no -i $DIR/ssh_key \
   ./admin.kubeconfig \
   ./kube-controller-manager.kubeconfig \
   ./kube-scheduler.kubeconfig \
   ubuntu@$CTRL1_PUB_IP:~/
-
 
 echo "Generating encryption-config"
 ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
@@ -662,11 +669,268 @@ $ctrl0ssh \
 $ctrl1ssh \
   kubectl get componentstatuses --kubeconfig admin.kubeconfig
 
+echo "-----------------------------------------------------"
+echo "Setting up RBAC"
+echo "-----------------------------------------------------"
+
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./rbac.sh \
   ubuntu@$CTRL0_PUB_IP:~/
 
 $ctrl0ssh ./rbac.sh
 
+echo "-----------------------------------------------------"
+echo "Setting up Load Balancer"
+echo "-----------------------------------------------------"
+
+$lbssh sudo yum install -y nginx
+$lbssh sudo systemctl enable nginx
+$lbssh sudo mkdir -p /etc/nginx/tcpconf.d
+$lbssh sudo yum -y install nginx-mod-stream
+
+cat << EOF | tee ./nginx-lb-kubernetes.conf
+stream {
+  upstream kubernetes {
+    server $CTRL0_PRIV_IP:6443;
+    server $CTRL1_PRIV_IP:6443;
+  }
+  server {
+    listen 6443;
+    listen 443;
+    proxy_pass kubernetes;
+  }
+}
+EOF
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./nginx-lb-kubernetes.conf \
+  ubuntu@$LB1_PUB_IP:~/
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./nginx.conf \
+  ubuntu@$LB1_PUB_IP:~/
+$lbssh sudo mv ./nginx.conf /etc/nginx/nginx.conf
+
+$lbssh sudo mv ./nginx-lb-kubernetes.conf /etc/nginx/tcpconf.d/kubernetes.conf
+$lbssh sudo nginx
+
+echo "-----------------------------------------------------"
+echo "Settup worker nodes"
+echo "-----------------------------------------------------"
+
+$w0ssh sudo yum -y install wget socat conntrack ipset
+$w1ssh sudo yum -y install wget socat conntrack ipset
+
+echo "Downloading worker 0 binaries"
+$w0ssh wget -q --timestamping \
+ https://github.com/kubernetes-incubator/cri-tools/releases/download/v1.0.0-beta.0/crictl-v1.0.0-beta.0-linux-amd64.tar.gz \
+ https://storage.googleapis.com/kubernetes-the-hard-way/runsc \
+ https://github.com/opencontainers/runc/releases/download/v1.0.0-rc5/runc.amd64 \
+ https://github.com/containernetworking/plugins/releases/download/v0.6.0/cni-plugins-amd64-v0.6.0.tgz \
+ https://github.com/containerd/containerd/releases/download/v1.1.0/containerd-1.1.0.linux-amd64.tar.gz \
+ https://storage.googleapis.com/kubernetes-release/release/v1.10.2/bin/linux/amd64/kubectl \
+ https://storage.googleapis.com/kubernetes-release/release/v1.10.2/bin/linux/amd64/kube-proxy \
+ https://storage.googleapis.com/kubernetes-release/release/v1.10.2/bin/linux/amd64/kubelet
+echo "Done"
+
+echo "Downloading worker 1 binaries"
+$w1ssh wget -q --timestamping \
+ https://github.com/kubernetes-incubator/cri-tools/releases/download/v1.0.0-beta.0/crictl-v1.0.0-beta.0-linux-amd64.tar.gz \
+ https://storage.googleapis.com/kubernetes-the-hard-way/runsc \
+ https://github.com/opencontainers/runc/releases/download/v1.0.0-rc5/runc.amd64 \
+ https://github.com/containernetworking/plugins/releases/download/v0.6.0/cni-plugins-amd64-v0.6.0.tgz \
+ https://github.com/containerd/containerd/releases/download/v1.1.0/containerd-1.1.0.linux-amd64.tar.gz \
+ https://storage.googleapis.com/kubernetes-release/release/v1.10.2/bin/linux/amd64/kubectl \
+ https://storage.googleapis.com/kubernetes-release/release/v1.10.2/bin/linux/amd64/kube-proxy \
+ https://storage.googleapis.com/kubernetes-release/release/v1.10.2/bin/linux/amd64/kubelet
+echo "Done"
+
+$w0ssh sudo mkdir -p \
+  /etc/cni/net.d \
+  /opt/cni/bin \
+  /var/lib/kubelet \
+  /var/lib/kube-proxy \
+  /var/lib/kubernetes \
+  /var/run/kubernetes
+
+$w0ssh sudo mkdir -p \
+  /etc/cni/net.d \
+  /opt/cni/bin \
+  /var/lib/kubelet \
+  /var/lib/kube-proxy \
+  /var/lib/kubernetes \
+  /var/run/kubernetes
+
+$w0ssh chmod +x kubectl kube-proxy kubelet runc.amd64 runsc
+$w0ssh sudo mv runc.amd64 runc
+$w0ssh sudo mv kubectl kube-proxy kubelet runc runsc /usr/local/bin/
+$w0ssh sudo tar -xvf crictl-v1.0.0-beta.0-linux-amd64.tar.gz -C /usr/local/bin/
+$w0ssh sudo tar -xvf cni-plugins-amd64-v0.6.0.tgz -C /opt/cni/bin/
+$w0ssh sudo tar -xvf containerd-1.1.0.linux-amd64.tar.gz -C /bin/
+
+$w1ssh sudo mkdir -p \
+  /etc/cni/net.d \
+  /opt/cni/bin \
+  /var/lib/kubelet \
+  /var/lib/kube-proxy \
+  /var/lib/kubernetes \
+  /var/run/kubernetes
+
+$w1ssh sudo mkdir -p \
+  /etc/cni/net.d \
+  /opt/cni/bin \
+  /var/lib/kubelet \
+  /var/lib/kube-proxy \
+  /var/lib/kubernetes \
+  /var/run/kubernetes
+
+$w1ssh chmod +x kubectl kube-proxy kubelet runc.amd64 runsc
+$w1ssh sudo mv runc.amd64 runc
+$w1ssh sudo mv kubectl kube-proxy kubelet runc runsc /usr/local/bin/
+$w1ssh sudo tar -xvf crictl-v1.0.0-beta.0-linux-amd64.tar.gz -C /usr/local/bin/
+$w1ssh sudo tar -xvf cni-plugins-amd64-v0.6.0.tgz -C /opt/cni/bin/
+$w1ssh sudo tar -xvf containerd-1.1.0.linux-amd64.tar.gz -C /bin/
+
+echo "Configuring containerd"
+$w0ssh sudo mkdir -p /etc/containerd/
+$w1ssh sudo mkdir -p /etc/containerd/
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./containerd/config.toml \
+  ubuntu@$WORKER0_PUB_IP:~/
+$w0ssh sudo mv config.toml /etc/containerd/config.toml
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./containerd/containerd.service \
+  ubuntu@$WORKER0_PUB_IP:~/
+$w0ssh sudo mv containerd.service /etc/systemd/system/containerd.service
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./containerd/config.toml \
+  ubuntu@$WORKER1_PUB_IP:~/
+$w1ssh sudo mv config.toml /etc/containerd/config.toml
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./containerd/containerd.service \
+  ubuntu@$WORKER1_PUB_IP:~/
+$w1ssh sudo mv containerd.service /etc/systemd/system/containerd.service
+
+$w0ssh sudo mv "$WORKER0_HOST-key.pem" "$WORKER0_HOST.pem" /var/lib/kubelet/
+$w0ssh sudo mv "$WORKER0_HOST.kubeconfig" /var/lib/kubelet/kubeconfig
+$w0ssh sudo mv ca.pem /var/lib/kubernetes/
+
+$w1ssh sudo mv "$WORKER1_HOST-key.pem" "$WORKER1_HOST.pem" /var/lib/kubelet/
+$w1ssh sudo mv "$WORKER1_HOST.kubeconfig" /var/lib/kubelet/kubeconfig
+$w1ssh sudo mv ca.pem /var/lib/kubernetes/
+
+cat << EOF | tee ./kubelet-config.yaml
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    enabled: true
+  x509:
+    clientCAFile: "/var/lib/kubernetes/ca.pem"
+authorization:
+  mode: Webhook
+clusterDomain: "cluster.local"
+clusterDNS:
+  - "10.32.0.10"
+runtimeRequestTimeout: "15m"
+tlsCertFile: "/var/lib/kubelet/${WORKER0_HOST}.pem"
+tlsPrivateKeyFile: "/var/lib/kubelet/${WORKER0_HOST}-key.pem"
+EOF
+
+cat << EOF | tee ./kubelet.service
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/kubernetes/kubernetes
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+ExecStart=/usr/local/bin/kubelet \\
+  --config=/var/lib/kubelet/kubelet-config.yaml \\
+  --container-runtime=remote \\
+  --container-runtime-endpoint=unix:///var/run/containerd/containerd.sock \\
+  --image-pull-progress-deadline=2m \\
+  --kubeconfig=/var/lib/kubelet/kubeconfig \\
+  --network-plugin=cni \\
+  --register-node=true \\
+  --v=2 \\
+  --hostname-override=${WORKER0_HOST} \\
+  --allow-privileged=true
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kublet-config.yaml \
+  ./kublet.service \
+  ubuntu@$WORKER0_PUB_IP:~/
+
+cat << EOF | tee ./kubelet-config.yaml
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    enabled: true
+  x509:
+    clientCAFile: "/var/lib/kubernetes/ca.pem"
+authorization:
+  mode: Webhook
+clusterDomain: "cluster.local"
+clusterDNS:
+  - "10.32.0.10"
+runtimeRequestTimeout: "15m"
+tlsCertFile: "/var/lib/kubelet/${WORKER1_HOST}.pem"
+tlsPrivateKeyFile: "/var/lib/kubelet/${WORKER1_HOST}-key.pem"
+EOF
+
+cat << EOF | tee ./kubelet.service
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/kubernetes/kubernetes
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+ExecStart=/usr/local/bin/kubelet \\
+  --config=/var/lib/kubelet/kubelet-config.yaml \\
+  --container-runtime=remote \\
+  --container-runtime-endpoint=unix:///var/run/containerd/containerd.sock \\
+  --image-pull-progress-deadline=2m \\
+  --kubeconfig=/var/lib/kubelet/kubeconfig \\
+  --network-plugin=cni \\
+  --register-node=true \\
+  --v=2 \\
+  --hostname-override=${WORKER1_HOST} \\
+  --allow-privileged=true
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kublet-config.yaml \
+  ./kublet.service \
+  ubuntu@$WORKER1_PUB_IP:~/
+
+$w1ssh sudo mv ./kublet-config.yaml /var/lib/kublet/kublet-config.yaml
+$w1ssh sudo mv ./kublet.service /etc/systemd/system/kublet.service
+$w0ssh sudo mv ./kublet-config.yaml /var/lib/kublet/kublet-config.yaml
+$w0ssh sudo mv ./kublet.service /etc/systemd/system/kublet.service
+
+
 rm ./*.service
 rm ./kube-scheduler.yaml
+rm ./nginx-lb-kubernetes.conf
+rm ./kubelet.service
+rm ./kubelet-config.yaml

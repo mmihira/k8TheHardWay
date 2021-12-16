@@ -33,6 +33,6 @@ roleRef:
   name: system:kube-apiserver-to-kubelet
 subjects:
   - apiGroup: rbac.authorization.k8s.io
-      kind: User
-      name: kubernetes
+    kind: User
+    name: kubernetes
 EOF
