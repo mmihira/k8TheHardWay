@@ -869,8 +869,8 @@ WantedBy=multi-user.target
 EOF
 
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
-  ./kublet-config.yaml \
-  ./kublet.service \
+  ./kubelet-config.yaml \
+  ./kubelet.service \
   ubuntu@$WORKER0_PUB_IP:~/
 
 cat << EOF | tee ./kubelet-config.yaml
@@ -919,14 +919,62 @@ WantedBy=multi-user.target
 EOF
 
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
-  ./kublet-config.yaml \
-  ./kublet.service \
+  ./kubelet-config.yaml \
+  ./kubelet.service \
   ubuntu@$WORKER1_PUB_IP:~/
 
-$w1ssh sudo mv ./kublet-config.yaml /var/lib/kublet/kublet-config.yaml
-$w1ssh sudo mv ./kublet.service /etc/systemd/system/kublet.service
-$w0ssh sudo mv ./kublet-config.yaml /var/lib/kublet/kublet-config.yaml
-$w0ssh sudo mv ./kublet.service /etc/systemd/system/kublet.service
+$w1ssh sudo mv ./kubelet-config.yaml /var/lib/kubelet/kubelet-config.yaml
+$w1ssh sudo mv ./kubelet.service /etc/systemd/system/kubelet.service
+$w0ssh sudo mv ./kubelet-config.yaml /var/lib/kubelet/kubelet-config.yaml
+$w0ssh sudo mv ./kubelet.service /etc/systemd/system/kubelet.service
+
+echo "Configuring kub-proxy"
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-proxy-config.yaml \
+  ubuntu@$WORKER1_PUB_IP:~/
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-proxy-config.yaml \
+  ubuntu@$WORKER0_PUB_IP:~/
+
+$w1ssh sudo mv ./kube-proxy-config.yaml /var/lib/kube-proxy/kube-proxy-config.yaml
+$w0ssh sudo mv ./kube-proxy-config.yaml /var/lib/kube-proxy/kube-proxy-config.yaml
+
+
+cat << EOF | tee ./kube-proxy.service
+[Unit]
+Description=Kubernetes Kube Proxy
+Documentation=https://github.com/kubernetes/kubernetes
+
+[Service]
+ExecStart=/usr/local/bin/kube-proxy --config=/var/lib/kube-proxy/kube-proxy-config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-proxy.service \
+  ubuntu@$WORKER1_PUB_IP:~/
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./kube-proxy.service \
+  ubuntu@$WORKER0_PUB_IP:~/
+
+$w1ssh sudo mv ./kube-proxy.service /etc/systemd/system/kube-proxy.service
+$w0ssh sudo mv ./kube-proxy.service /etc/systemd/system/kube-proxy.service
+
+$w1ssh sudo systemctl daemon-reload
+$w1ssh sudo systemctl enable containerd kubelet kube-proxy
+$w1ssh sudo systemctl start containerd kubelet kube-proxy
+
+$w0ssh sudo systemctl daemon-reload
+$w0ssh sudo systemctl enable containerd kubelet kube-proxy
+$w0ssh sudo systemctl start containerd kubelet kube-proxy
+
+$ctrl0ssh kubectl get nodes
+$ctrl1ssh kubectl get nodes
 
 
 rm ./*.service

@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 ExecStartPre=/sbin/modprobe overlay
-ExecStart=/bin/containerd
+ExecStart=/bin/bin/containerd
 Restart=always
 RestartSec=5
 Delegate=yes
@@ -17,4 +17,3 @@ LimitCORE=infinity
 
 [Install]
 WantedBy=multi-user.target
-EOF
