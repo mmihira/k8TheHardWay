@@ -677,6 +677,9 @@ scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./rbac.sh \
   ubuntu@$CTRL0_PUB_IP:~/
 
+echo "Sleeping 10seconds"
+$ctrl0ssh sleep 10s
+$ctrl0ssh sudo systemctl status kube-apiserver kube-controller-manager kube-scheduler
 $ctrl0ssh ./rbac.sh
 
 echo "-----------------------------------------------------"
@@ -751,45 +754,33 @@ $w0ssh sudo mkdir -p \
   /var/lib/kubelet \
   /var/lib/kube-proxy \
   /var/lib/kubernetes \
-  /var/run/kubernetes
+  /var/run/kubernetes \
+  /tmp/cont
 
-$w0ssh sudo mkdir -p \
+$w1ssh sudo mkdir -p \
   /etc/cni/net.d \
   /opt/cni/bin \
   /var/lib/kubelet \
   /var/lib/kube-proxy \
   /var/lib/kubernetes \
-  /var/run/kubernetes
+  /var/run/kubernetes \
+  /tmp/cont
 
 $w0ssh chmod +x kubectl kube-proxy kubelet runc.amd64 runsc
 $w0ssh sudo mv runc.amd64 runc
 $w0ssh sudo mv kubectl kube-proxy kubelet runc runsc /usr/local/bin/
 $w0ssh sudo tar -xvf crictl-v1.0.0-beta.0-linux-amd64.tar.gz -C /usr/local/bin/
 $w0ssh sudo tar -xvf cni-plugins-amd64-v0.6.0.tgz -C /opt/cni/bin/
-$w0ssh sudo tar -xvf containerd-1.1.0.linux-amd64.tar.gz -C /bin/
-
-$w1ssh sudo mkdir -p \
-  /etc/cni/net.d \
-  /opt/cni/bin \
-  /var/lib/kubelet \
-  /var/lib/kube-proxy \
-  /var/lib/kubernetes \
-  /var/run/kubernetes
-
-$w1ssh sudo mkdir -p \
-  /etc/cni/net.d \
-  /opt/cni/bin \
-  /var/lib/kubelet \
-  /var/lib/kube-proxy \
-  /var/lib/kubernetes \
-  /var/run/kubernetes
+$w0ssh sudo tar -xvf containerd-1.1.0.linux-amd64.tar.gz -C /tmp/cont
+$w0ssh sudo cp /tmp/cont/bin/* /bin/
 
 $w1ssh chmod +x kubectl kube-proxy kubelet runc.amd64 runsc
 $w1ssh sudo mv runc.amd64 runc
 $w1ssh sudo mv kubectl kube-proxy kubelet runc runsc /usr/local/bin/
 $w1ssh sudo tar -xvf crictl-v1.0.0-beta.0-linux-amd64.tar.gz -C /usr/local/bin/
 $w1ssh sudo tar -xvf cni-plugins-amd64-v0.6.0.tgz -C /opt/cni/bin/
-$w1ssh sudo tar -xvf containerd-1.1.0.linux-amd64.tar.gz -C /bin/
+$w1ssh sudo tar -xvf containerd-1.1.0.linux-amd64.tar.gz -C /tmp/cont
+$w1ssh sudo cp /tmp/cont/bin/* /bin/
 
 echo "Configuring containerd"
 $w0ssh sudo mkdir -p /etc/containerd/
@@ -940,6 +931,8 @@ scp -o StrictHostKeyChecking=no -i ./ssh_key \
 $w1ssh sudo mv ./kube-proxy-config.yaml /var/lib/kube-proxy/kube-proxy-config.yaml
 $w0ssh sudo mv ./kube-proxy-config.yaml /var/lib/kube-proxy/kube-proxy-config.yaml
 
+$w1ssh sudo mv ./kube-proxy.kubeconfig /var/lib/kube-proxy/kubeconfig
+$w0ssh sudo mv ./kube-proxy.kubeconfig /var/lib/kube-proxy/kubeconfig
 
 cat << EOF | tee ./kube-proxy.service
 [Unit]
@@ -976,6 +969,20 @@ $w0ssh sudo systemctl start containerd kubelet kube-proxy
 $ctrl0ssh kubectl get nodes
 $ctrl1ssh kubectl get nodes
 
+echo "-----------------------------------------------------"
+echo "Setup Weave net"
+echo "-----------------------------------------------------"
+
+$w1ssh sudo sysctl net.ipv4.conf.all.forwarding=1
+$w0ssh sudo sysctl net.ipv4.conf.all.forwarding=1
+$w1ssh 'echo "net.ipv4.conf.all.forwarding=1" | sudo tee -a /etc/sysctl.conf; sudo cat /etc/sysctl.conf'
+$w0ssh 'echo "net.ipv4.conf.all.forwarding=1" | sudo tee -a /etc/sysctl.conf; sudo cat /etc/sysctl.conf'
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./weavenet_install.sh \
+  ubuntu@$CTRL0_PUB_IP:~/
+
+$ctrl0ssh ./weavenet_install.sh
 
 rm ./*.service
 rm ./kube-scheduler.yaml

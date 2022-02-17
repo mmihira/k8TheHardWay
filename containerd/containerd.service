@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 ExecStartPre=/sbin/modprobe overlay
-ExecStart=/bin/bin/containerd
+ExecStart=/bin/containerd
 Restart=always
 RestartSec=5
 Delegate=yes

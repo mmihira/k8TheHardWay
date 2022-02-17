@@ -7,5 +7,5 @@ resources:
       - aescbc:
           keys:
             - name: key1
-              secret: beB+RlJHqyD01nq/ElevYnT5JvNbmbSfkwuMkip1+yc=
+              secret: bBoij2ote+RDH4sotyQs3aKESfRglWNlP1WUOUhnnAg=
       - identity: {}
