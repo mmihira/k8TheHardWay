@@ -64,37 +64,6 @@ resource "google_compute_router_nat" "nat_router" {
   }
 }
 
-resource "google_compute_firewall" "vpc-default" {
-  name    = "test-firewall"
-  network = google_compute_network.vpc.name
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22"]
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-}
-
-resource "google_compute_firewall" "intra-node" {
-  name    = "intra-node"
-  network = google_compute_network.vpc.name
-
-  allow {
-    protocol = "tcp"
-    ports    = ["0-65535"]
-  }
-  allow {
-    protocol = "udp"
-    ports    = ["0-65535"]
-  }
-  allow {
-    protocol = "icmp"
-  }
-
-  source_ranges = ["10.10.0.0/16"]
-}
-
 resource "google_compute_instance" "node1" {
   name = "node1"
   machine_type = "g1-small"
@@ -248,4 +217,48 @@ resource "google_compute_instance" "lb" {
   metadata = {
     ssh-keys = "ubuntu:${file("ssh_key.pub")}"
   }
+}
+
+resource "google_compute_firewall" "vpc-default" {
+  name    = "ssh-firewall"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+}
+
+resource "google_compute_firewall" "intra-node" {
+  name    = "intra-node"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["0-65535"]
+  }
+  allow {
+    protocol = "udp"
+    ports    = ["0-65535"]
+  }
+  allow {
+    protocol = "icmp"
+  }
+
+  source_ranges = ["10.10.0.0/16"]
+}
+
+resource "google_compute_firewall" "lb-80" {
+  name    = "lb-80"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags = ["lb"]
 }
