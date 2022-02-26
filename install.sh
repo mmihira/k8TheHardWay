@@ -703,6 +703,43 @@ stream {
     proxy_pass kubernetes;
   }
 }
+
+
+http {
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile            on;
+    tcp_nopush          on;
+    tcp_nodelay         on;
+    keepalive_timeout   65;
+    types_hash_max_size 4096;
+
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
+
+    # Load modular configuration files from the /etc/nginx/conf.d directory.
+    # See http://nginx.org/en/docs/ngx_core_module.html#include
+    # for more information.
+    include /etc/nginx/conf.d/*.conf;
+
+    server {
+        listen       80;
+        listen       [::]:80;
+        server_name  _;
+        root         /usr/share/nginx/html;
+
+        # Load configuration files for the default server block.
+        include /etc/nginx/default.d/*.conf;
+
+        error_page 404 /404.html;
+        location = /404.html {
+        }
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+        }
+    }
+}
 EOF
 
 scp -o StrictHostKeyChecking=no -i ./ssh_key \
@@ -713,9 +750,24 @@ scp -o StrictHostKeyChecking=no -i ./ssh_key \
   ./nginx.conf \
   ubuntu@$LB1_PUB_IP:~/
 $lbssh sudo mv ./nginx.conf /etc/nginx/nginx.conf
-
 $lbssh sudo mv ./nginx-lb-kubernetes.conf /etc/nginx/tcpconf.d/kubernetes.conf
 $lbssh sudo nginx
+
+rm ./nginx-lb-kubernetes.conf
+
+echo "Install docker on loadbalancer"
+
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./docker/remote_docker_install.sh \
+  ubuntu@$LB1_PUB_IP:~/
+scp -o StrictHostKeyChecking=no -i ./ssh_key \
+  ./docker/remote_compose_install.sh \
+  ubuntu@$LB1_PUB_IP:~/
+$lbssh ./remote_docker_install.sh
+$lbssh ./remote_compose_install.sh
+$lbssh sudo service docker start
+$lbssh sudo docker info
+
 
 echo "-----------------------------------------------------"
 echo "Settup worker nodes"
@@ -984,8 +1036,22 @@ scp -o StrictHostKeyChecking=no -i ./ssh_key \
 
 $ctrl0ssh ./weavenet_install.sh
 
+
+echo "-----------------------------------------------------"
+echo "-----------------------------------------------------"
+$ctrl0ssh kubectl delete deployment busybox
+$ctrl0ssh kubectl delete deployment nginx
+$ctrl0ssh kubectl delete svc nginx
+
+
+echo "-----------------------------------------------------"
+echo "Install Kube-DNS"
+echo "-----------------------------------------------------"
+$ctrl0ssh kubectl create -f https://storage.googleapis.com/kubernetes-the-hard-way/kube-dns.yaml
+$ctrl0ssh kubectl get pods -l k8s-app=kube-dns -n kube-system
+
 rm ./*.service
 rm ./kube-scheduler.yaml
-rm ./nginx-lb-kubernetes.conf
 rm ./kubelet.service
 rm ./kubelet-config.yaml
+
