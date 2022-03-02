@@ -688,7 +688,6 @@ echo "-----------------------------------------------------"
 
 ./install/setup_load_balancer.sh
 
-
 echo "-----------------------------------------------------"
 echo "Settup worker nodes"
 echo "-----------------------------------------------------"
@@ -962,7 +961,6 @@ echo "-----------------------------------------------------"
 $ctrl0ssh kubectl delete deployment busybox
 $ctrl0ssh kubectl delete deployment nginx
 $ctrl0ssh kubectl delete svc nginx
-
 
 echo "-----------------------------------------------------"
 echo "Install Kube-DNS"

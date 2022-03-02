@@ -15,13 +15,13 @@ stream {
     server $CTRL0_PRIV_IP:6443;
     server $CTRL1_PRIV_IP:6443;
   }
+
   server {
     listen 6443;
     listen 443;
     proxy_pass kubernetes;
   }
 }
-
 
 http {
     sendfile            on;
@@ -32,17 +32,32 @@ http {
 
     include             /etc/nginx/mime.types;
     default_type        application/octet-stream;
+    gzip              on;
+    gzip_http_version 1.0;
+    gzip_proxied      any;
+    gzip_min_length   500;
+    gzip_disable      "MSIE [1-6]\.";
+    gzip_types        text/plain text/xml text/css
+                      text/comma-separated-values
+                      text/javascript
+                      application/x-javascript
+                      application/atom+xml;
 
-    # Load modular configuration files from the /etc/nginx/conf.d directory.
-    # See http://nginx.org/en/docs/ngx_core_module.html#include
-    # for more information.
     include /etc/nginx/conf.d/*.conf;
+
+    upstream knode {
+      server $WORKER0_PRIV_IP:30007;
+      server $WORKER1_PRIV_IP:30007;
+    }
 
     server {
         listen       80;
         listen       [::]:80;
-        server_name  _;
-        root         /usr/share/nginx/html;
+
+        location /app/ {
+            proxy_pass         http://knode/;
+            proxy_redirect     off;
+        }
 
         # Load configuration files for the default server block.
         include /etc/nginx/default.d/*.conf;
